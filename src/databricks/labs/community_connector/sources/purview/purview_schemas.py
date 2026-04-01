@@ -211,16 +211,49 @@ DATA_ASSETS_METADATA = {
     "ingestion_type": "cdc",
 }
 
+# ---------- catalog_data_assets schema (Unified Catalog API) ----------
+
+CATALOG_DATA_ASSETS_SCHEMA = StructType(
+    [
+        StructField("id", StringType(), nullable=False),
+        StructField("name", StringType(), nullable=False),
+        StructField("type", StringType(), nullable=True),
+        StructField("description", StringType(), nullable=True),
+        StructField("isMigrated", BooleanType(), nullable=True),
+        StructField("source_type", StringType(), nullable=True),
+        StructField("source_assetId", StringType(), nullable=True),
+        StructField("source_assetType", StringType(), nullable=True),
+        StructField("source_fqn", StringType(), nullable=True),
+        StructField("source_accountName", StringType(), nullable=True),
+        StructField("source_lastRefreshedAt", StringType(), nullable=True),
+        StructField("source_lastRefreshedBy", StringType(), nullable=True),
+        StructField("contacts_owner", StringType(), nullable=True),
+        StructField("contacts_expert", StringType(), nullable=True),
+        StructField("systemData_provisioningState", StringType(), nullable=True),
+        StructField("systemData_createdAt", StringType(), nullable=True),
+        StructField("systemData_createdBy", StringType(), nullable=True),
+        StructField("systemData_lastModifiedAt", StringType(), nullable=True),
+    ]
+)
+
+CATALOG_DATA_ASSETS_METADATA = {
+    "primary_keys": ["id"],
+    "cursor_field": "",
+    "ingestion_type": "snapshot",
+}
+
 # ---------- table registry ----------
 
 TABLE_SCHEMAS = {
     "domains": DOMAINS_SCHEMA,
     "data_products": DATA_PRODUCTS_SCHEMA,
     "data_assets": DATA_ASSETS_SCHEMA,
+    "catalog_data_assets": CATALOG_DATA_ASSETS_SCHEMA,
 }
 
 TABLE_METADATA = {
     "domains": DOMAINS_METADATA,
     "data_products": DATA_PRODUCTS_METADATA,
     "data_assets": DATA_ASSETS_METADATA,
+    "catalog_data_assets": CATALOG_DATA_ASSETS_METADATA,
 }

@@ -35,7 +35,7 @@ from databricks.labs.community_connector.sources.purview.purview_schemas import 
     UNIFIED_CATALOG_BASE_URL,
 )
 
-_TABLES = ["domains", "data_products", "data_assets"]
+_TABLES = ["domains", "data_products", "data_assets", "catalog_data_assets"]
 
 # Default lookback for data_assets incremental reads: 1 hour in ms.
 _LOOKBACK_MS = 3_600_000
@@ -182,6 +182,8 @@ class PurviewLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             return self._read_data_products()
         elif table_name == "data_assets":
             return self._read_data_assets_incremental(start_offset, table_options)
+        elif table_name == "catalog_data_assets":
+            return self._read_catalog_data_assets()
         else:
             raise ValueError(f"Unknown table: {table_name}")
 
@@ -377,6 +379,64 @@ class PurviewLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             params = {}  # nextLink already contains query params
 
         return iter(records), {}
+
+    def _read_catalog_data_assets(self) -> tuple[Iterator[dict], dict]:
+        """Full snapshot read of data assets from the Unified Catalog API."""
+        url = f"{self._unified_catalog_url}/datagovernance/catalog/dataAssets"
+        params: dict[str, str] = {"api-version": UNIFIED_CATALOG_API_VERSION}
+
+        records: list[dict] = []
+        while url:
+            resp = self._request_with_retry("GET", url, params=params)
+            if resp.status_code != 200:
+                raise RuntimeError(
+                    f"Failed to read catalog_data_assets: {resp.status_code} {resp.text}"
+                )
+            data = resp.json()
+            for item in data.get("value", []):
+                records.append(self._normalize_catalog_asset(item))
+            url = data.get("nextLink")
+            params = {}  # nextLink already contains query params
+
+        return iter(records), {}
+
+    @staticmethod
+    def _normalize_catalog_asset(item: dict) -> dict:
+        """Normalize a Unified Catalog data asset into a clean flat record."""
+        import json as _json
+
+        source = item.get("source") or {}
+        contacts = item.get("contacts") or {}
+        sys_data = item.get("systemData") or {}
+
+        return {
+            "id": item.get("id"),
+            "name": item.get("name"),
+            "type": item.get("type"),
+            "description": item.get("description"),
+            "isMigrated": item.get("isMigrated"),
+            "source_type": source.get("type"),
+            "source_assetId": source.get("assetId"),
+            "source_assetType": source.get("assetType"),
+            "source_fqn": source.get("fqn"),
+            "source_accountName": source.get("accountName"),
+            "source_lastRefreshedAt": source.get("lastRefreshedAt"),
+            "source_lastRefreshedBy": source.get("lastRefreshedBy"),
+            "contacts_owner": _json.dumps(contacts.get("owner"), default=str)
+            if contacts.get("owner")
+            else None,
+            "contacts_expert": _json.dumps(contacts.get("expert"), default=str)
+            if contacts.get("expert")
+            else None,
+            "systemData_provisioningState": sys_data.get("provisioningState"),
+            "systemData_createdAt": PurviewLakeflowConnect._normalize_timestamp(
+                sys_data.get("createdAt")
+            ),
+            "systemData_createdBy": sys_data.get("createdBy"),
+            "systemData_lastModifiedAt": PurviewLakeflowConnect._normalize_timestamp(
+                sys_data.get("lastModifiedAt")
+            ),
+        }
 
     # ------------------------------------------------------------------
     # Incremental reader for data_assets (used by simpleStreamReader fallback)

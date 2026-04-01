@@ -80,7 +80,7 @@ def main():
     parser.add_argument(
         "--tables",
         "-t",
-        default="domains,data_products,data_assets",
+        default="domains,data_products,data_assets,catalog_data_assets",
         help="Comma-separated list of tables to export (default: all)",
     )
     parser.add_argument(
