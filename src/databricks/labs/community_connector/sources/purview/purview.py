@@ -402,11 +402,17 @@ class PurviewLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         if since_ms >= self._init_ts_ms:
             return iter([]), start_offset or {}
 
-        window_ms = int(table_options.get("window_seconds", "86400")) * 1000
-        max_records = int(table_options.get("max_records_per_batch", "1000"))
+        max_records = int(table_options.get("max_records_per_batch", "10000"))
         limit = int(table_options.get("page_size", "1000"))
 
-        until_ms = min(since_ms + window_ms, self._init_ts_ms)
+        # Initial load (since_ms == 0): full scan with no time filter.
+        # Incremental loads: use a sliding time window.
+        is_initial = since_ms == 0
+        if is_initial:
+            until_ms = self._init_ts_ms
+        else:
+            window_ms = int(table_options.get("window_seconds", "86400")) * 1000
+            until_ms = min(since_ms + window_ms, self._init_ts_ms)
 
         # Apply lookback only on the first call of the trigger.
         query_since_ms = since_ms
@@ -417,35 +423,36 @@ class PurviewLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         url = f"{self._data_map_url}/datamap/api/search/query"
         params = {"api-version": DATA_MAP_API_VERSION}
 
-        filter_clauses = []
-        if query_since_ms > 0:
+        # Build filter: no time filter for initial load, time-bounded for incremental.
+        search_filter: dict | None = None
+        if not is_initial:
+            filter_clauses = []
+            if query_since_ms > 0:
+                filter_clauses.append(
+                    {
+                        "attributeName": "modifiedTime",
+                        "operator": "ge",
+                        "attributeValue": query_since_ms,
+                    }
+                )
             filter_clauses.append(
                 {
                     "attributeName": "modifiedTime",
-                    "operator": "ge",
-                    "attributeValue": query_since_ms,
+                    "operator": "le",
+                    "attributeValue": until_ms,
                 }
             )
-        filter_clauses.append(
-            {
-                "attributeName": "modifiedTime",
-                "operator": "le",
-                "attributeValue": until_ms,
-            }
-        )
-
-        search_filter: dict
-        if len(filter_clauses) == 1:
-            search_filter = filter_clauses[0]
-        else:
-            search_filter = {"and": filter_clauses}
+            search_filter = (
+                filter_clauses[0] if len(filter_clauses) == 1 else {"and": filter_clauses}
+            )
 
         body: dict = {
             "keywords": None,
             "limit": limit,
             "continuationToken": None,
-            "filter": search_filter,
         }
+        if search_filter:
+            body["filter"] = search_filter
 
         records: list[dict] = []
         while True:
