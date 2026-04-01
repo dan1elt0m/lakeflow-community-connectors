@@ -936,6 +936,12 @@ def register_lakeflow_source(spark):
             if start_ms >= end_ms:
                 return []
 
+            # First streaming micro-batch (start_offset is None): return a single
+            # partition covering the full range to avoid generating thousands of
+            # daily windows from epoch.
+            if start_offset is None:
+                return [{"since_ms": start_ms, "until_ms": end_ms}]
+
             # Split the range into windows. The window size is configurable
             # via table_options["window_seconds"] (default: 86400 = 1 day).
             window_ms = int(table_options.get("window_seconds", "86400")) * 1000
@@ -1042,7 +1048,8 @@ def register_lakeflow_source(spark):
                 if resp.status_code != 200:
                     raise RuntimeError(f"Failed to read domains: {resp.status_code} {resp.text}")
                 data = resp.json()
-                records.extend(data.get("value", []))
+                for item in data.get("value", []):
+                    records.append(self._normalize_system_data(item))
                 url = data.get("nextLink")
                 params = {}  # nextLink already contains query params
 
@@ -1063,7 +1070,8 @@ def register_lakeflow_source(spark):
                 if resp.status_code != 200:
                     raise RuntimeError(f"Failed to read data_products: {resp.status_code} {resp.text}")
                 data = resp.json()
-                records.extend(data.get("value", []))
+                for item in data.get("value", []):
+                    records.append(self._normalize_system_data(item))
                 url = data.get("nextLink")
                 params = {}  # nextLink already contains query params
 
@@ -1167,6 +1175,35 @@ def register_lakeflow_source(spark):
         # ------------------------------------------------------------------
         # Helpers
         # ------------------------------------------------------------------
+
+        @staticmethod
+        def _normalize_timestamp(value: str | None) -> str | None:
+            """Truncate high-precision ISO timestamps to microseconds (6 fractional digits).
+
+            Purview returns up to 7 fractional digits (e.g. '2026-01-21T14:04:56.3431776Z')
+            but Spark TimestampType only supports up to 6.
+            """
+            if value is None:
+                return None
+            # Match pattern like .1234567Z and truncate to .123456Z
+            if "." in value and value.endswith("Z"):
+                dot_idx = value.index(".")
+                frac = value[dot_idx + 1 : -1]  # digits between . and Z
+                if len(frac) > 6:
+                    frac = frac[:6]
+                return value[: dot_idx + 1] + frac + "Z"
+            return value
+
+        @staticmethod
+        def _normalize_system_data(record: dict) -> dict:
+            """Normalize systemData timestamps in a record to be Spark-compatible."""
+            sys_data = record.get("systemData")
+            if isinstance(sys_data, dict):
+                ts_fields = ["createdAt", "lastModifiedAt", "expiredAt"]
+                for field in ts_fields:
+                    if field in sys_data:
+                        sys_data[field] = PurviewLakeflowConnect._normalize_timestamp(sys_data[field])
+            return record
 
         @staticmethod
         def _normalize_asset(item: dict) -> dict:
