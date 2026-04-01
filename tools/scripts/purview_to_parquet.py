@@ -53,6 +53,12 @@ def export_table(connector: PurviewLakeflowConnect, table_name: str, output_dir:
 
     df = pd.DataFrame(records)
 
+    # Replace all-null columns (Parquet "void" type) with empty strings
+    # so Power BI and other tools can read them as STRING.
+    for col in df.columns:
+        if df[col].isna().all():
+            df[col] = df[col].fillna("").astype(str)
+
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     filename = f"{table_name}_{timestamp}.parquet"
     filepath = output_dir / filename
